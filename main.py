@@ -52,6 +52,7 @@ if args.cuda:
 
 
 kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+
 train_loader = torch.utils.data.DataLoader(
     datasets.CIFAR10('./data', train=True, download=True,
                    transform=transforms.Compose([
@@ -62,6 +63,7 @@ train_loader = torch.utils.data.DataLoader(
                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                    ])),
     batch_size=args.batch_size, shuffle=True, **kwargs)
+
 test_loader = torch.utils.data.DataLoader(
     datasets.CIFAR10('./data', train=False, transform=transforms.Compose([
                        transforms.ToTensor(),
@@ -146,7 +148,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 
 best_prec1 = 0.
 for epoch in range(args.start_epoch, args.epochs):
-    if epoch in [args.epochs*0.5, args.epochs*0.75]:
+    if epoch in [args.epochs*0.5, args.epochs*0.75]: # ?
         for param_group in optimizer.param_groups:
             param_group['lr'] *= 0.1
     train(epoch)

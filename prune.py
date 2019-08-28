@@ -7,6 +7,10 @@ from torchvision import datasets, transforms
 
 from vgg import vgg
 import numpy as np
+'''
+only use for prune
+'''
+
 
 # Prune settings
 parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR prune')
@@ -25,10 +29,12 @@ parser.add_argument('--save', default='', type=str, metavar='PATH',
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+# consttuct the vgg model
 model = vgg()
 if args.cuda:
     model.cuda()
-if args.model:
+# if have pre-model load the model
+if args.model: 
     if os.path.isfile(args.model):
         print("=> loading checkpoint '{}'".format(args.model))
         checkpoint = torch.load(args.model)
@@ -41,11 +47,13 @@ if args.model:
         print("=> no checkpoint found at '{}'".format(args.resume))
 
 print(model)
+# sum of the weights to prune
 total = 0
 for m in model.modules():
     if isinstance(m, nn.BatchNorm2d):
         total += m.weight.data.shape[0]
 
+# copy abs(BN weights)
 bn = torch.zeros(total)
 index = 0
 for m in model.modules():
@@ -54,22 +62,25 @@ for m in model.modules():
         bn[index:(index+size)] = m.weight.data.abs().clone()
         index += size
 
+# sort and get the index , set the threshold acrodding to prune percent
 y, i = torch.sort(bn)
 thre_index = int(total * args.percent)
 thre = y[thre_index]
 
+
+#
 pruned = 0
 cfg = []
 cfg_mask = []
 for k, m in enumerate(model.modules()):
     if isinstance(m, nn.BatchNorm2d):
         weight_copy = m.weight.data.clone()
-        mask = weight_copy.abs().gt(thre).float().cuda()
-        pruned = pruned + mask.shape[0] - torch.sum(mask)
-        m.weight.data.mul_(mask)
+        mask = weight_copy.abs().gt(thre).float().cuda() # mask
+        pruned = pruned + mask.shape[0] - torch.sum(mask) # number to prune
+        m.weight.data.mul_(mask) # set the prune value to zero
         m.bias.data.mul_(mask)
-        cfg.append(int(torch.sum(mask)))
-        cfg_mask.append(mask.clone())
+        cfg.append(int(torch.sum(mask))) # seems like the new channels
+        cfg_mask.append(mask.clone()) # append the mask
         print('layer index: {:d} \t total channel: {:d} \t remaining channel: {:d}'.
             format(k, mask.shape[0], int(torch.sum(mask))))
     elif isinstance(m, nn.MaxPool2d):
@@ -107,24 +118,24 @@ test()
 
 # Make real prune
 print(cfg)
-newmodel = vgg(cfg=cfg)
+newmodel = vgg(cfg=cfg) # construct the prune model (zeros weight version)
 newmodel.cuda()
 
 layer_id_in_cfg = 0
-start_mask = torch.ones(3)
+start_mask = torch.ones(3) # 1 1 1 for input layer
 end_mask = cfg_mask[layer_id_in_cfg]
 for [m0, m1] in zip(model.modules(), newmodel.modules()):
     if isinstance(m0, nn.BatchNorm2d):
-        idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
-        m1.weight.data = m0.weight.data[idx1].clone()
+        idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy()))) #index of value != 0 
+        m1.weight.data = m0.weight.data[idx1].clone() # get the weights to new models
         m1.bias.data = m0.bias.data[idx1].clone()
-        m1.running_mean = m0.running_mean[idx1].clone()
+        m1.running_mean = m0.running_mean[idx1].clone() # ?
         m1.running_var = m0.running_var[idx1].clone()
         layer_id_in_cfg += 1
         start_mask = end_mask.clone()
         if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
             end_mask = cfg_mask[layer_id_in_cfg]
-    elif isinstance(m0, nn.Conv2d):
+    elif isinstance(m0, nn.Conv2d): # change the num of conv neurons
         idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
         idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
         print('In shape: {:d} Out shape:{:d}'.format(idx0.shape[0], idx1.shape[0]))
@@ -132,7 +143,7 @@ for [m0, m1] in zip(model.modules(), newmodel.modules()):
         w = w[idx1, :, :, :].clone()
         m1.weight.data = w.clone()
         # m1.bias.data = m0.bias.data[idx1].clone()
-    elif isinstance(m0, nn.Linear):
+    elif isinstance(m0, nn.Linear): # chane the num of the input fc
         idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
         m1.weight.data = m0.weight.data[:, idx0].clone()
 
